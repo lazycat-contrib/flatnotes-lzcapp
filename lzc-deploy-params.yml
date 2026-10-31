@@ -1,0 +1,12 @@
+params:
+  - id: login_password
+    type: secret
+    name: Shared account password
+    description: Password for the shared admin account. Changes update the login credential; only grant application access to trusted members.
+    default_value: "$random(len=20)"
+    optional: false
+locales:
+  zh:
+    login_password:
+      name: 共享账号密码
+      description: admin 共享账号的密码；更新参数会改变登录凭据，仅向可信成员授予应用访问权限。

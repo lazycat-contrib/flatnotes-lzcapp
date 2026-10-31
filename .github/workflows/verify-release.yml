@@ -1,0 +1,63 @@
+name: Verify flatnotes Release on GitHub
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact published LPK release tag
+        required: true
+        default: v5.5.5
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: flatnotes-release-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Download exact Release asset on runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET_NAME="community.lazycat.app.flatnotes-${RELEASE_TAG}.lpk"
+          echo "ASSET_NAME=$ASSET_NAME" >> "$GITHUB_ENV"
+          gh release view "$RELEASE_TAG" --json tagName,assets > release-metadata.json
+          gh release download "$RELEASE_TAG" --pattern "$ASSET_NAME" --dir verify-pkg
+      - name: Independently verify package identity and SHA256
+        shell: python
+        run: |
+          import hashlib, json, os, tarfile
+          from pathlib import Path
+          meta = json.loads(Path('release-metadata.json').read_text())
+          name = os.environ['ASSET_NAME']
+          assets = [a for a in meta['assets'] if a['name'] == name]
+          assert len(assets) == 1
+          assert assets[0]['digest'].startswith('sha256:')
+          p = Path('verify-pkg') / name
+          h = hashlib.sha256()
+          with p.open('rb') as f:
+              for chunk in iter(lambda: f.read(8 * 1024 * 1024), b''):
+                  h.update(chunk)
+          assert 'sha256:' + h.hexdigest() == assets[0]['digest']
+          with tarfile.open(p) as package:
+              names = package.getnames()
+              assert {'package.yml','manifest.yml','deploy_params.yml','icon.png'} <= set(names)
+              info = package.extractfile('package.yml').read().decode()
+              assert 'community.lazycat.app.flatnotes' in info
+              assert os.environ['RELEASE_TAG'].removeprefix('v') in info
+              manifest = package.extractfile('manifest.yml').read().decode()
+              assert 'http://flatnotes:8080/' in manifest
+              assert '/lzcapp/var/data:/data' in manifest
+              assert 'FLATNOTES_AUTH_TYPE=password' in manifest
+              assert 'builtin://simple-inject-password' in manifest
+              params = package.extractfile('deploy_params.yml').read().decode()
+              assert 'login_password' in params
+          result = {'verified':True,'tag':os.environ['RELEASE_TAG'],'sha256':h.hexdigest(),'size':p.stat().st_size,'runtime_tested':False}
+          print(json.dumps(result))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('Independent cloud package verification\n\n' + json.dumps(result,indent=2) + '\n')

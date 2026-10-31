@@ -1,0 +1,45 @@
+application:
+  subdomain: flatnotes
+  multi_instance: false
+  upstreams:
+    - location: /
+      backend: http://flatnotes:8080/
+  injects:
+    - id: login-autofill
+      on: browser
+      when:
+        - /login
+      do:
+        - src: builtin://simple-inject-password
+          params:
+            user: admin
+            password: |-
+              {{ .U.login_password | replace "\r" "" | replace "\n" "\n              " }}
+            userSelector: '#username'
+            passwordSelector: '#password'
+            autoSubmit: false
+services:
+  flatnotes:
+    # upstream: docker.io/dullage/flatnotes:v5.5.5
+    image: docker.1ms.run/dullage/flatnotes:v5.5.5
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - FLATNOTES_HOST=0.0.0.0
+      - FLATNOTES_PORT=8080
+      - FLATNOTES_PATH=/data
+      - FLATNOTES_AUTH_TYPE=password
+      - FLATNOTES_USERNAME=admin
+      - |-
+        FLATNOTES_PASSWORD={{ .U.login_password | replace "\r" "" | replace "\n" "\n        " }}
+      - FLATNOTES_SECRET_KEY={{ stable_secret "flatnotes-jwt" }}
+    binds:
+      - /lzcapp/var/data:/data
+usage: |
+  flatnotes 使用 Markdown 文件保存笔记，提供全文搜索、标签、原文与可视化编辑，无需外部数据库。
+  登录账号 admin，密码来自部署参数；/login 自动填充但不自动提交。入口同时保留懒猫身份认证，无匿名公共路径。
+  这是共享单账号应用，不提供成员独立笔记空间；授权成员共用账号并能修改或删除全部笔记，只向可信成员授予应用访问权限。
+  笔记与搜索索引保存在应用内部 /lzcapp/var/data，卸载前请整体导出或备份；该目录不是个人网盘目录。
+  容器沿用上游入口设置目录属主后降权到 UID1000:1000，保留上游内置健康检查，不新增 smoke 作业或文件选择器拦截。
+  修改部署参数密码会改变共享账号登录凭据；会话签名密钥使用独立稳定随机值。
+  未验证懒猫实机启动、密码填充、笔记增删改、搜索、附件或重启持久化。
